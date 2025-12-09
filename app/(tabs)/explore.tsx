@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { SafeAreaView, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -120,6 +120,8 @@ export default function HistoryScreen() {
           const historyString = await AsyncStorage.getItem('fastingHistory');
           if (historyString) {
             setHistory(JSON.parse(historyString));
+          } else {
+            setHistory([]); // Setzt den Verlauf zurück, wenn nichts gefunden wird
           }
         } catch (e) {
           console.error('Failed to load history.', e);
@@ -130,7 +132,7 @@ export default function HistoryScreen() {
   );
 
   return (
-    <ThemedView style={styles.container}>
+    <SafeAreaView style={styles.safeArea}>
       <ThemedView style={styles.titleContainer}>
         <ThemedText
           type="title"
@@ -185,19 +187,22 @@ export default function HistoryScreen() {
           <ThemedText style={styles.emptyText}>Noch keine abgeschlossenen Fasten vorhanden.</ThemedText>
         )}
       </ScrollView>
-    </ThemedView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
-    padding: 24,
+    backgroundColor: '#F8FAFC',
   },
   titleContainer: {
     flexDirection: 'row',
     gap: 8,
     marginBottom: 24,
+    padding: 24,
+    paddingTop: 10, // Add some top padding
+    backgroundColor: 'transparent',
   },
   card: {
     backgroundColor: '#FFFFFF',
@@ -206,6 +211,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderWidth: 1,
     borderColor: '#F1F5F9',
+    marginHorizontal: 24,
   },
   cardHeader: {
     flexDirection: 'row',
