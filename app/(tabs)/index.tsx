@@ -1,13 +1,18 @@
+import { GRACE_PERIOD_SECONDS, MAX_PLANS } from '@/constants/app';
+import { FastingEntry, FastingStatus, loadFastingHistory, saveFastingHistory } from '@/constants/fastingHistoryService';
+import { FastingPlan, loadFastingPlans, saveFastingPlans, setActiveFastingPlan } from '@/constants/fastingPlanService';
+import { formatHoursMinutes, formatTime } from '@/constants/formatters';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons'; // Standard Icons in Expo
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useState } from 'react';
-import { Alert, Dimensions, Modal, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Dimensions, Modal, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View, ViewStyle } from 'react-native';
 import { Circle, Svg } from 'react-native-svg';
 
 const { width } = Dimensions.get('window');
 const CIRCLE_SIZE = width * 0.75; // Kreisgröße relativ zum Bildschirm
 const RADIUS = CIRCLE_SIZE / 2 - 10;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
+const DEFAULT_FASTING_HOURS = 16;
 
 export default function App() {
   const [isFasting, setIsFasting] = useState(false);
@@ -23,27 +28,20 @@ export default function App() {
   const [isLinked, setIsLinked] = useState(true);
   const [isNewPlan, setIsNewPlan] = useState(false);
 
-  const activePlan = plans.find(p => p.id === activePlanId) || null;
-  const fastingGoal = (activePlan?.fastingHours || 16) * 3600;
+  const activePlan = plans.find(p => p.id === activePlanId) || plans[0] || null;
+  const fastingGoal = (activePlan?.fastingHours || DEFAULT_FASTING_HOURS) * 3600;
 
   // Load plans from storage on initial mount
   useEffect(() => {
     const loadPlans = async () => {
       try {
-        let plansString = await AsyncStorage.getItem('fastingPlans');
-        let activeIdString = await AsyncStorage.getItem('activePlanId');
-
-        if (!plansString) {
-          // Create default plan if none exist
-          const defaultPlan = { id: 1, name: '16:8 Leangains', fastingHours: 16, eatingHours: 8 };
-          const defaultPlans = [defaultPlan];
-          await AsyncStorage.setItem('fastingPlans', JSON.stringify(defaultPlans));
-          await AsyncStorage.setItem('activePlanId', '1');
-          setPlans(defaultPlans);
-          setActivePlanId(1);
-        } else {
-          setPlans(JSON.parse(plansString));
-          setActivePlanId(activeIdString ? parseInt(activeIdString, 10) : 1);
+        const { plans: loadedPlans, activePlanId: loadedActivePlanId } = await loadFastingPlans();
+        setPlans(loadedPlans);
+        setActivePlanId(loadedActivePlanId);
+        if (!loadedPlans.find(p => p.id === loadedActivePlanId) && loadedPlans.length > 0) {
+          // Fallback if active plan was deleted
+          setActivePlanId(loadedPlans[0].id);
+          setActiveFastingPlan(loadedPlans[0].id);
         }
       } catch (e) {
         console.error("Failed to load plans.", e);
@@ -90,21 +88,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, [isFasting, startTime]);
 
-  const formatTime = (seconds) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
-
-  const formatHoursMinutes = (timestamp) => {
-    if (!timestamp) return '--:--';
-    const date = new Date(timestamp);
-    const h = date.getHours().toString().padStart(2, '0');
-    const m = date.getMinutes().toString().padStart(2, '0');
-    return `${h}:${m}`;
-  };
-
   const getProgress = () => {
     // Wenn das Fasten aktiv ist, aber die Zeit noch 0 ist,
     // geben wir einen minimalen Wert zurück, um den Start des Kreises sofort sichtbar zu machen.
@@ -115,6 +98,32 @@ export default function App() {
   };
 
   const strokeDashoffset = CIRCUMFERENCE - getProgress() * CIRCUMFERENCE;
+
+  const handleStopFasting = async () => {
+    if (elapsedTime < GRACE_PERIOD_SECONDS) {
+      await AsyncStorage.removeItem('isFasting');
+      await AsyncStorage.removeItem('startTime');
+      return;
+    }
+
+    let status: FastingStatus = 'aborted';
+    if (elapsedTime >= fastingGoal * 1.1) {
+      status = 'extended';
+    } else if (elapsedTime >= fastingGoal) {
+      status = 'completed';
+    } else if (elapsedTime >= fastingGoal * 0.9) {
+      status = 'nearly_there';
+    }
+
+    const planSnapshot = {
+      name: activePlan?.name || `Unbekannter Plan (${DEFAULT_FASTING_HOURS}h)`,
+      fastingHours: activePlan?.fastingHours || DEFAULT_FASTING_HOURS,
+    };
+    const newFast: FastingEntry = { id: Date.now(), startTime, duration: elapsedTime, status, plan: planSnapshot };
+    await saveFastingHistory([newFast, ...(await loadFastingHistory())]);
+    await AsyncStorage.removeItem('isFasting');
+    await AsyncStorage.removeItem('startTime');
+  };
 
   // --- UI VIEW KOMPONENTEN ---
 
@@ -192,56 +201,17 @@ export default function App() {
 
       {/* Start/Stop Button */}
       <TouchableOpacity
-        onPress={() => {
-          const stopFasting = async () => {
-            try {
-              const GRACE_PERIOD_SECONDS = 300; // 5 Minuten Karenzzeit
-              if (elapsedTime < GRACE_PERIOD_SECONDS) { // Speichert nicht, wenn es WENIGER als 5 Minuten sind
-                // Fasten war zu kurz, wird nicht gespeichert. Nur der aktive Zustand wird zurückgesetzt.
-                await AsyncStorage.removeItem('isFasting');
-                await AsyncStorage.removeItem('startTime');
-                return; // Funktion hier beenden
-              }
-
-              const historyString = await AsyncStorage.getItem('fastingHistory');
-              const history = historyString ? JSON.parse(historyString) : [];
-              
-              let status = 'aborted';
-              if (elapsedTime >= fastingGoal * 1.1) {
-                status = 'extended';
-              } else if (elapsedTime >= fastingGoal) {
-                status = 'completed';
-              } else if (elapsedTime >= fastingGoal * 0.9) {
-                status = 'nearly_there';
-              }
-
-              const planSnapshot = {
-                name: activePlan?.name || 'Unbekannter Plan',
-                fastingHours: activePlan?.fastingHours || 16,
-              };
-
-              const newFast = { id: Date.now(), startTime, duration: elapsedTime, status, plan: planSnapshot };
-              history.unshift(newFast); // Add to the beginning of the array
-              await AsyncStorage.setItem('fastingHistory', JSON.stringify(history));
-
-              // Clear active fast state
-              await AsyncStorage.removeItem('isFasting');
-              await AsyncStorage.removeItem('startTime');
-            } catch (e) {
-              console.error("Failed to save fast to history.", e);
-            }
-          };
-
+        onPress={async () => {
           const newFastingState = !isFasting;
           setIsFasting(newFastingState);
           if (newFastingState) { // Starting a fast
             const now = Date.now();
             setStartTime(now);
             setElapsedTime(0);
-            AsyncStorage.setItem('isFasting', 'true');
-            AsyncStorage.setItem('startTime', now.toString());
+            await AsyncStorage.setItem('isFasting', 'true');
+            await AsyncStorage.setItem('startTime', now.toString());
           } else {
-            stopFasting();
+            await handleStopFasting();
           }
         }}
         style={[styles.actionButton, isFasting ? styles.btnStop : styles.btnStart]}
@@ -260,112 +230,119 @@ export default function App() {
       <Modal
         animationType="fade"
         transparent={true}
-        visible={isModalVisible && editingPlan !== null}
+        visible={isModalVisible}
         onRequestClose={() => setIsModalVisible(false)}
       >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>{isNewPlan ? 'Neuen Plan erstellen' : 'Plan bearbeiten'}</Text>
+        {/* FÜGE EINE PRÜFUNG HINZU: Rendere den Inhalt nur, wenn 'editingPlan' existiert */}
+        {editingPlan && (
+          <View style={styles.modalContainer}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>{isNewPlan ? 'Neuen Plan erstellen' : 'Plan bearbeiten'}</Text>
 
-            <View style={styles.inputRow}>
-              <Text style={[styles.modalLabel, styles.nameTimeLabel]}>
-                {editingPlan?.fastingHours || 0}:{editingPlan?.eatingHours || 0}
-              </Text>
-              <View style={styles.inputWrapper}>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="Mein Plan"
-                  value={editingPlan?.name.split(' ').slice(1).join(' ')}
-                  onChangeText={(customName) => {
-                    const filteredName = customName.replace(/[^a-zA-Z0-9 ]/g, ''); // Erlaubt nur Buchstaben, Zahlen und Leerzeichen
-                    const prefix = `${editingPlan?.fastingHours || 0}:${editingPlan?.eatingHours || 0}`; // Keep prefix
-                    setEditingPlan(prev => ({ ...prev, name: `${prefix} ${filteredName}` })); // Do NOT trim here
-                  }}
-                />
-                <View style={styles.unitSpacer} />
+              <View style={styles.inputRow}>
+                <Text style={[styles.modalLabel, styles.nameTimeLabel]}>
+                  {/* Explizite Trennung der Text-Elemente, um den Fehler zu beheben */}
+                  {String(editingPlan.fastingHours || 0)}
+                  <Text>:</Text>
+                  {String(editingPlan.eatingHours || 0)}
+                </Text>
+                <View style={styles.inputWrapper}>
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder="Name des Plans"
+                    value={editingPlan.name.split(' ').slice(1).join(' ')}
+                    onChangeText={(customName) => {
+                      if (customName.length > 15) return;
+                      const filteredName = customName.replace(/[^a-zA-Z0-9 ]/g, ''); // Erlaubt nur Buchstaben, Zahlen und Leerzeichen
+                      const prefix = `${editingPlan.fastingHours || 0}:${editingPlan.eatingHours || 0}`; // Keep prefix
+                      setEditingPlan(prev => ({ ...prev, name: `${prefix} ${filteredName}` })); // Do NOT trim here
+                    }}
+                  />
+                  <View style={styles.unitSpacer} /> {/* Spacer for alignment */}
+                </View>
               </View>
-            </View>
-            <Text style={styles.inputHint}>Nur Buchstaben, Zahlen und Leerzeichen.</Text>
-            
-            <View style={styles.inputRow}>
-              <Text style={styles.modalLabel}>Fastenzeit</Text>
-              <View style={styles.inputWrapper}>
-                <TextInput
-                  style={styles.textInput}
-                  value={String(editingPlan?.fastingHours || '')}
-                  keyboardType="numeric"
-                  onChangeText={(text) => {
-                    const hours = parseInt(text, 10);
-                    if (!isNaN(hours) && hours >= 1 && (isLinked ? hours <= 23 : true)) {
-                      const newValues = { fastingHours: hours };
-                      if (isLinked) newValues.eatingHours = 24 - hours;
-                      setEditingPlan(prev => ({ ...prev, ...newValues }));
-                    } else if (text === '') {
-                      setEditingPlan(prev => ({ ...prev, fastingHours: '' }));
-                    }
-                  }}
-                />
-                <Text style={styles.modalUnitLabel}>h</Text>
+              <Text style={styles.inputHint}>Nur Buchstaben, Zahlen und Leerzeichen.</Text>
+              
+              <View style={styles.inputRow}>
+                <Text style={styles.modalLabel}>Fastenzeit</Text>
+                <View style={styles.inputWrapper}>
+                  <TextInput
+                    style={styles.textInput} // Use textInput for consistent styling
+                    value={String(editingPlan.fastingHours || '')}
+                    keyboardType="numeric"
+                    onChangeText={(text) => {
+                      const hours = parseInt(text, 10);
+                      if (!isNaN(hours) && hours >= 1 && (isLinked ? hours <= 23 : true)) {
+                        const newValues = { fastingHours: hours };
+                        if (isLinked) newValues.eatingHours = 24 - hours;
+                        setEditingPlan(prev => ({ ...prev, ...newValues }));
+                      } else if (text === '') {
+                        setEditingPlan(prev => ({ ...prev, fastingHours: '' }));
+                      }
+                    }}
+                  />
+                  <Text style={styles.modalUnitLabel}>h</Text>
+                </View>
               </View>
-            </View>
 
-            <TouchableOpacity style={styles.linkButton} onPress={() => setIsLinked(!isLinked)}>
-              <MaterialCommunityIcons
-                name={isLinked ? "link-variant" : "link-variant-off"}
-                size={24}
-                color={isLinked ? "#14B8A6" : "#94A3B8"} />
-            </TouchableOpacity>
-
-            <View style={styles.inputRow}>
-              <Text style={styles.modalLabel}>Essenszeit</Text>
-              <View style={styles.inputWrapper}>
-                <TextInput
-                  style={styles.textInput}
-                  value={String(editingPlan?.eatingHours || '')}
-                  keyboardType="numeric"
-                  onChangeText={(text) => {
-                    const hours = parseInt(text, 10);
-                    if (!isNaN(hours) && hours >= 1 && (isLinked ? hours <= 23 : true)) {
-                      const newValues = { eatingHours: hours };
-                      if (isLinked) newValues.fastingHours = 24 - hours;
-                      setEditingPlan(prev => ({ ...prev, ...newValues }));
-                    } else if (text === '') {
-                      setEditingPlan(prev => ({ ...prev, eatingHours: '' }));
-                    }
-                  }}
-                />
-                <Text style={styles.modalUnitLabel}>h</Text>
-              </View>
-            </View>
-
-            <View style={styles.modalButtonContainer}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => setIsModalVisible(false)}
-              >
-                <Text style={styles.cancelButtonText}>Abbrechen</Text>
+              <TouchableOpacity style={styles.linkButton} onPress={() => setIsLinked(!isLinked)}>
+                <MaterialCommunityIcons
+                  name={isLinked ? "link-variant" : "link-variant-off"}
+                  size={24}
+                  color={isLinked ? "#14B8A6" : "#94A3B8"} />
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.saveButton]}
-                onPress={async () => {
-                  let updatedPlans;
-                  const planToSave = { ...editingPlan, name: editingPlan.name.trim() }; // Trim name before saving
-                  if (isNewPlan) {
-                    updatedPlans = [...plans, planToSave];
-                  } else {
-                    updatedPlans = plans.map(p => p.id === editingPlan.id ? planToSave : p);
-                  }
-                  setPlans(updatedPlans);
-                  await AsyncStorage.setItem('fastingPlans', JSON.stringify(updatedPlans));
-                  setIsModalVisible(false);
-                  setEditingPlan(null);
-                }}
-              >
-                <Text style={styles.saveButtonText}>Speichern</Text>
-              </TouchableOpacity>
+
+              <View style={styles.inputRow}>
+                <Text style={styles.modalLabel}>Essenszeit</Text>
+                <View style={styles.inputWrapper}>
+                  <TextInput // Use textInput for consistent styling
+                    style={styles.textInput}
+                    value={String(editingPlan.eatingHours || '')}
+                    keyboardType="numeric"
+                    onChangeText={(text) => {
+                      const hours = parseInt(text, 10);
+                      if (!isNaN(hours) && hours >= 1 && (isLinked ? hours <= 23 : true)) {
+                        const newValues = { eatingHours: hours };
+                        if (isLinked) newValues.fastingHours = 24 - hours;
+                        setEditingPlan(prev => ({ ...prev, ...newValues }));
+                      } else if (text === '') {
+                        setEditingPlan(prev => ({ ...prev, eatingHours: '' }));
+                      }
+                    }}
+                  />
+                  <Text style={styles.modalUnitLabel}>h</Text>
+                </View>
+              </View>
+
+              <View style={styles.modalButtonContainer}>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.cancelButton]}
+                  onPress={() => setIsModalVisible(false)}
+                >
+                  <Text style={styles.cancelButtonText}>Abbrechen</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.saveButton]}
+                  onPress={async () => {
+                    let updatedPlans;
+                    const planToSave = { ...editingPlan, name: editingPlan.name.trim() } as FastingPlan; // Trim name before saving
+                    if (isNewPlan) {
+                      updatedPlans = [...plans, planToSave].sort((a, b) => a.id - b.id); // Sort by ID for consistency
+                    } else {
+                      updatedPlans = plans.map(p => p.id === editingPlan.id ? planToSave : p);
+                    }
+                    setPlans(updatedPlans);
+                    await saveFastingPlans(updatedPlans);
+                    setIsModalVisible(false);
+                    setEditingPlan(null);
+                  }}
+                >
+                  <Text style={styles.saveButtonText}>Speichern</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
+        )}
       </Modal>
 
       <View style={[styles.header, { justifyContent: 'flex-start' }]}>
@@ -426,7 +403,7 @@ export default function App() {
                           { text: 'Löschen', style: 'destructive', onPress: async () => {
                               const updatedPlans = plans.filter(p => p.id !== plan.id);
                               setPlans(updatedPlans);
-                              await AsyncStorage.setItem('fastingPlans', JSON.stringify(updatedPlans));
+                              await saveFastingPlans(updatedPlans);
                           }},
                         ]
                       );
@@ -438,14 +415,14 @@ export default function App() {
               </View>
             </TouchableOpacity>
           ))}
-          {plans.length < 7 && (
+          {plans.length < MAX_PLANS && (
             <TouchableOpacity
               style={[styles.planRow, styles.addPlanButton]}
               onPress={() => {
-                const newPlanId = Date.now(); // Simple unique ID
+                const newPlanId = (plans.length > 0 ? Math.max(...plans.map(p => p.id)) : 0) + 1; // Generate next ID
                 setEditingPlan({
                   id: newPlanId,
-                  name: '16:8 Mein Plan',
+                  name: `${DEFAULT_FASTING_HOURS}:${24 - DEFAULT_FASTING_HOURS} Mein Plan`,
                   fastingHours: 16,
                   eatingHours: 8,
                 });
@@ -466,7 +443,7 @@ export default function App() {
             onPress={async () => {
               try {
                 const today = new Date();
-                const fastingGoal = 16 * 3600; // Ensure fastingGoal is defined here
+                const fastingGoal = DEFAULT_FASTING_HOURS * 3600;
 
                 // Define the exact counts for each status
                 const statusesToGenerate = [
@@ -508,7 +485,7 @@ export default function App() {
                     startTime: fastDate.getTime(),
                     duration,
                     status,
-                    plan: { name: '16:8 Leangains', fastingHours: 16 },
+                    plan: { name: `${DEFAULT_FASTING_HOURS}:${24 - DEFAULT_FASTING_HOURS} Leangains`, fastingHours: DEFAULT_FASTING_HOURS },
                   };
                 });
 
@@ -517,7 +494,7 @@ export default function App() {
                 // Keep only non-mock data if regenerating
                 const nonMockHistory = existingHistory.filter(f => !mockFasts.some(m => m.id === f.id));
                 const combinedHistory = [...nonMockHistory, ...mockFasts].sort((a, b) => b.startTime - a.startTime);
-
+                
                 await AsyncStorage.setItem('fastingHistory', JSON.stringify(combinedHistory));
                 Alert.alert('Erfolg', `${statusesToGenerate.length} neue Test-Einträge wurden zum Verlauf hinzugefügt.`);
               } catch (e) {
@@ -535,7 +512,7 @@ export default function App() {
                 [
                   { text: 'Abbrechen', style: 'cancel' },
                   { text: 'Löschen', style: 'destructive', onPress: async () => {
-                      await AsyncStorage.removeItem('fastingHistory');
+                      await clearFastingHistory();
                       Alert.alert('Erfolg', 'Der Verlauf wurde gelöscht.');
                   }},
                 ]);
@@ -556,7 +533,7 @@ export default function App() {
   );
 }
 
-const baseInputStyle = {
+const baseInputStyle: ViewStyle = {
   backgroundColor: '#F8FAFC',
   borderWidth: 1,
   borderColor: '#E2E8F0',
@@ -565,7 +542,7 @@ const baseInputStyle = {
   paddingVertical: 10,
   fontSize: 16,
 };
-
+ 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -706,6 +683,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
+    width: '100%',
     borderBottomColor: '#F8FAFC',
   },
   activePlanRow: {
@@ -733,7 +711,7 @@ const styles = StyleSheet.create({
     height: 10,
     borderRadius: 5,
     backgroundColor: '#14B8A6',
-  },
+  }, // End of activeDot
   addPlanButton: {
     justifyContent: 'center',
     backgroundColor: '#F0F9FF', // Light blue background
@@ -745,7 +723,7 @@ const styles = StyleSheet.create({
     color: '#0EA5E9', // Sky 500
     textAlign: 'center',
     paddingVertical: 4,
-  },
+  }, // End of addPlanButton
 
   // Modal Styles
   modalContainer: {
@@ -770,7 +748,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1E293B',
     marginBottom: 20,
-  },
+  }, // End of modalTitle
   modalLabel: { // Base style for all labels in modal
     fontSize: 16,
     color: '#475569',
@@ -778,14 +756,14 @@ const styles = StyleSheet.create({
   },
   nameTimeLabel: { // Specific style for the dynamic time label
     fontSize: 16,
-    fontWeight: '600',
-    color: '#64748B',
+    fontWeight: '700', // Make it bolder
+    color: '#334155', // Darker color
   },
   linkButton: {
     padding: 8,
     alignSelf: 'center',
     marginVertical: 4,
-  },
+  }, // End of linkButton
   inputHint: {
     fontSize: 12,
     color: '#94A3B8',
@@ -798,11 +776,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
     marginBottom: 0,
-  },
+  }, // End of inputWrapper
   textInput: {
     flex: 1,
     height: '100%',
-    fontSize: 16,
+    fontSize: 16, // Ensure consistent font size
   },
   modalUnitLabel: {
     fontSize: 16,
@@ -810,16 +788,16 @@ const styles = StyleSheet.create({
     marginLeft: 10,
   },
   unitSpacer: {
-    width: 30, // Corresponds to modalUnitLabel width (20) + marginLeft (10)
+    width: 30, // Corresponds to modalUnitLabel width (20) + marginLeft (10) for alignment
     height: '100%', // Match height of input
-  },
+  }, // End of unitSpacer
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
     height: 44, // Explicit height
     marginBottom: 4, // Small gap between rows
   },
-  modalButtonContainer: {
+  modalButtonContainer: { // End of inputRow
     flexDirection: 'row',
     justifyContent: 'flex-end',
     marginTop: 24,
@@ -827,14 +805,14 @@ const styles = StyleSheet.create({
   modalButton: {
     paddingVertical: 10,
     paddingHorizontal: 20,
-    borderRadius: 8,
+    borderRadius: 8, // Consistent border radius
     marginLeft: 10,
   },
   saveButton: {
     backgroundColor: '#0F172A',
   },
   saveButtonText: {
-    color: 'white',
+    color: 'white', // Consistent text color
     fontWeight: '600',
   },
   cancelButton: {
@@ -843,5 +821,5 @@ const styles = StyleSheet.create({
   cancelButtonText: {
     color: '#475569',
     fontWeight: '600',
-  },
+  }, // End of cancelButtonText
 });

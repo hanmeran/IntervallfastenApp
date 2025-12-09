@@ -1,86 +1,21 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import { SafeAreaView, ScrollView, StyleSheet, View } from 'react-native';
 
+import HistoryPieChart from '@/components/HistoryPieChart';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { STATUS_CONFIG } from '@/constants/app';
+import { FastingEntry, loadFastingHistory } from '@/constants/fastingHistoryService';
+import { formatDate, formatHistoryTime, formatTotalDuration } from '@/constants/formatters';
 import { Fonts } from '@/constants/theme';
-import { Path, Svg } from 'react-native-svg';
 
-const formatHistoryTime = (seconds) => {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  return `${h}h ${m}m`;
-};
-
-const formatTotalDuration = (seconds) => {
-  const totalHours = Math.floor(seconds / 3600);
-  const days = Math.floor(totalHours / 24);
-  return `${days} Tage, ${totalHours % 24} Stunden`;
-};
-
-const formatDate = (timestamp) => {
-  const date = new Date(timestamp);
-  return date.toLocaleDateString('de-DE', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
-};
-
-const STATUS_CONFIG = {
-  completed: { label: 'Erfolgreich', color: '#10B981', bgColor: '#ECFDF5' },
-  extended: { label: 'Überzogen', color: '#06B6D4', bgColor: '#E0F7FA' },
-  nearly_there: { label: 'Knapp verfehlt', color: '#F59E0B', bgColor: '#FFFBEB' },
-  aborted: { label: 'Abgebrochen', color: '#EF4444', bgColor: '#FEF2F2' },
-};
-
-const PieChart = ({ data }) => {
-  const size = 120;
-  const radius = size / 2;
-  const total = data.reduce((sum, item) => sum + item.value, 0);
-  if (total === 0) return null;
-
-  let startAngle = 0;
-
-  const slices = data.map(slice => {
-    const angle = (slice.value / total) * 360;
-    const endAngle = startAngle + angle;
-
-    const x1 = radius + radius * Math.cos((startAngle * Math.PI) / 180);
-    const y1 = radius + radius * Math.sin((startAngle * Math.PI) / 180);
-    const x2 = radius + radius * Math.cos((endAngle * Math.PI) / 180);
-    const y2 = radius + radius * Math.sin((endAngle * Math.PI) / 180);
-
-    const largeArcFlag = angle > 180 ? 1 : 0;
-
-    const d = `M ${radius},${radius} L ${x1},${y1} A ${radius},${radius} 0 ${largeArcFlag} 1 ${x2},${y2} Z`;
-    startAngle = endAngle;
-
-    return <Path key={slice.label} d={d} fill={slice.color} />;
-  });
-
-  return (
-    <View style={styles.chartContainer}>
-      <Svg width={size} height={size}>
-        {slices}
-      </Svg>
-      <View style={styles.legendContainer}>
-        {data.map(item => (
-          <View key={item.label} style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: item.color }]} />
-            <ThemedText style={styles.legendText}>{item.label} ({item.value})</ThemedText>
-          </View>
-        ))}
-      </View>
-    </View>
-  );
-};
+/*
+ * Extracted PieChart component to its own file: components/HistoryPieChart.tsx
+ */
 
 export default function HistoryScreen() {
-  const [history, setHistory] = useState([]);
+  const [history, setHistory] = useState<FastingEntry[]>([]);
 
   const summaryStats = useMemo(() => {
     if (!history.length) return { count: 0, totalDuration: 0, plans: [] };
@@ -117,13 +52,14 @@ export default function HistoryScreen() {
   useFocusEffect(
     useCallback(() => {
       const loadHistory = async () => {
-        try {
-          const historyString = await AsyncStorage.getItem('fastingHistory');
-          if (historyString) {
-            setHistory(JSON.parse(historyString));
-          } else {
-            setHistory([]); // Setzt den Verlauf zurück, wenn nichts gefunden wird
-          }
+        try { // Use the service to load history
+          const loadedHistory = await loadFastingHistory();
+          setHistory(loadedHistory);
+          // Ensure plan objects are correctly parsed if they were strings
+          setHistory(prev => prev.map(entry => ({
+            ...entry,
+            plan: typeof entry.plan === 'string' ? { name: entry.plan, fastingHours: 0 } : entry.plan, // Default fastingHours if not present
+          })));
         } catch (e) {
           console.error('Failed to load history.', e);
         }
@@ -153,7 +89,7 @@ export default function HistoryScreen() {
               <ThemedText style={styles.summaryTotalValue}>{summaryStats.count}</ThemedText>
             </View>
           </View>
-          <PieChart data={chartData} />
+          <HistoryPieChart data={chartData} />
           <View style={styles.totalDurationContainer}>
             {summaryStats.plans.length > 0 && (
               <ThemedText style={styles.summaryPlanText}>Statistik für: {summaryStats.plans.join(', ')}</ThemedText>
@@ -165,7 +101,7 @@ export default function HistoryScreen() {
 
       <ScrollView style={{ width: '100%' }}>
         {history.length > 0 ? (
-          history.map((fast) => {
+          history.map((fast: FastingEntry) => {
             const config = STATUS_CONFIG[fast.status] || {};
             return (
               <View key={fast.id} style={styles.card}>
@@ -179,8 +115,7 @@ export default function HistoryScreen() {
                 </View>
                 <View style={styles.cardBody}>
                   <ThemedText style={styles.cardDuration}>Dauer: {formatHistoryTime(fast.duration)}</ThemedText>
-                  {/* Handle both old string plans and new object plans */}
-                  {fast.plan && <ThemedText style={styles.cardPlan}>{typeof fast.plan === 'string' ? fast.plan : fast.plan.name}</ThemedText>}
+                  {fast.plan && <ThemedText style={styles.cardPlan}>{fast.plan.name}</ThemedText>}
                 </View>
               </View>
             );
@@ -193,7 +128,7 @@ export default function HistoryScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const localStyles = StyleSheet.create({ // Renamed to localStyles to avoid conflicts if moved
   safeArea: {
     flex: 1,
     backgroundColor: '#F8FAFC',
@@ -254,10 +189,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
   },
-  summaryHeader: {
+  summaryHeader: { // This style is fine
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-end',
+    alignItems: 'flex-end', // Align to bottom
     marginBottom: 16,
   },
   summaryTitle: {
@@ -279,13 +214,13 @@ const styles = StyleSheet.create({
   legendItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 8, // Space between legend items
   },
   legendDot: {
-    width: 10,
+    width: 10, // Dot size
     height: 10,
-    borderRadius: 5,
-    marginRight: 8,
+    borderRadius: 5, // Make it a circle
+    marginRight: 8, // Space between dot and text
   },
   legendText: {
     fontSize: 14,
@@ -320,3 +255,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+// Export styles for use in HistoryPieChart
+export const styles = {
+  ...localStyles,
+  chartContainer: localStyles.chartContainer,
+  legendContainer: localStyles.legendContainer,
+};
