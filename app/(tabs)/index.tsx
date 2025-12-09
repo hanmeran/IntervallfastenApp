@@ -21,6 +21,7 @@ export default function App() {
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [editingPlan, setEditingPlan] = useState(null);
   const [isLinked, setIsLinked] = useState(true);
+  const [isNewPlan, setIsNewPlan] = useState(false);
 
   const activePlan = plans.find(p => p.id === activePlanId) || null;
   const fastingGoal = (activePlan?.fastingHours || 16) * 3600;
@@ -246,12 +247,12 @@ export default function App() {
       <Modal
         animationType="fade"
         transparent={true}
-        visible={isModalVisible}
+        visible={isModalVisible && editingPlan !== null}
         onRequestClose={() => setIsModalVisible(false)}
       >
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Plan bearbeiten</Text>
+            <Text style={styles.modalTitle}>{isNewPlan ? 'Neuen Plan erstellen' : 'Plan bearbeiten'}</Text>
 
             <View style={styles.inputRow}>
               <Text style={[styles.modalLabel, styles.nameTimeLabel]}>
@@ -331,7 +332,12 @@ export default function App() {
               <TouchableOpacity
                 style={[styles.modalButton, styles.saveButton]}
                 onPress={async () => {
-                  const updatedPlans = plans.map(p => p.id === editingPlan.id ? editingPlan : p);
+                  let updatedPlans;
+                  if (isNewPlan) {
+                    updatedPlans = [...plans, editingPlan];
+                  } else {
+                    updatedPlans = plans.map(p => p.id === editingPlan.id ? editingPlan : p);
+                  }
                   setPlans(updatedPlans);
                   await AsyncStorage.setItem('fastingPlans', JSON.stringify(updatedPlans));
                   setIsModalVisible(false);
@@ -370,20 +376,70 @@ export default function App() {
                   <Text style={[styles.planLabel, plan.id === activePlanId && styles.activePlanLabel]}>{plan.name}</Text>
                   <Text style={styles.planDesc}>{plan.fastingHours}h Fasten, {plan.eatingHours}h Essen</Text>
                 </View>
-                <TouchableOpacity
-                  style={styles.iconButton}
-                  onPress={() => {
-                    // Reset states when opening modal
-                    setEditingPlan({ ...plan }); 
-                    setIsLinked(true);
-                    setIsModalVisible(true);
-                  }}
-                >
-                  <Feather name="edit-2" size={20} color="#94A3B8" />
-                </TouchableOpacity>
+                <View style={{ flexDirection: 'row' }}>
+                  <TouchableOpacity
+                    style={styles.iconButton}
+                    onPress={() => {
+                      // Reset states when opening modal
+                      setEditingPlan({ ...plan }); 
+                      setIsNewPlan(false);
+                      setIsLinked(true);
+                      setIsModalVisible(true);
+                    }}
+                  >
+                    <Feather name="edit-2" size={20} color="#94A3B8" />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.iconButton}
+                    onPress={() => {
+                      if (plan.id === activePlanId) {
+                        Alert.alert('Aktion nicht möglich', 'Der aktive Plan kann nicht gelöscht werden.');
+                        return;
+                      }
+                      if (plans.length <= 1) {
+                        Alert.alert('Aktion nicht möglich', 'Der letzte verbleibende Plan kann nicht gelöscht werden.');
+                        return;
+                      }
+
+                      Alert.alert(
+                        'Plan löschen',
+                        `Möchtest du den Plan "${plan.name}" wirklich löschen?`,
+                        [
+                          { text: 'Abbrechen', style: 'cancel' },
+                          { text: 'Löschen', style: 'destructive', onPress: async () => {
+                              const updatedPlans = plans.filter(p => p.id !== plan.id);
+                              setPlans(updatedPlans);
+                              await AsyncStorage.setItem('fastingPlans', JSON.stringify(updatedPlans));
+                          }},
+                        ]
+                      );
+                    }}
+                  >
+                    <Feather name="trash-2" size={20} color="#EF4444" />
+                  </TouchableOpacity>
+                </View>
               </View>
             </TouchableOpacity>
           ))}
+          {plans.length < 10 && (
+            <TouchableOpacity
+              style={[styles.planRow, styles.addPlanButton]}
+              onPress={() => {
+                const newPlanId = Date.now(); // Simple unique ID
+                setEditingPlan({
+                  id: newPlanId,
+                  name: '16:8 Mein Plan',
+                  fastingHours: 16,
+                  eatingHours: 8,
+                });
+                setIsNewPlan(true);
+                setIsLinked(true);
+                setIsModalVisible(true);
+              }}
+            >
+              <Text style={styles.addPlanButtonText}>+ Neuen Plan hinzufügen</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Developer Section */}
@@ -662,6 +718,18 @@ const styles = StyleSheet.create({
     height: 10,
     borderRadius: 5,
     backgroundColor: '#14B8A6',
+  },
+  addPlanButton: {
+    justifyContent: 'center',
+    backgroundColor: '#F0F9FF', // Light blue background
+    borderBottomWidth: 0, // No bottom border for the last item
+  },
+  addPlanButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#0EA5E9', // Sky 500
+    textAlign: 'center',
+    paddingVertical: 4,
   },
 
   // Modal Styles
