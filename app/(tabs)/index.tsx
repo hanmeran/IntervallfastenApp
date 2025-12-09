@@ -1,4 +1,4 @@
-import { Feather } from '@expo/vector-icons'; // Standard Icons in Expo
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons'; // Standard Icons in Expo
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useState } from 'react';
 import { Alert, Dimensions, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -105,7 +105,7 @@ export default function App() {
             cx={CIRCLE_SIZE / 2}
             cy={CIRCLE_SIZE / 2}
             r={RADIUS}
-            stroke={isFasting ? "#14B8A6" : "#FB923C"} // Türkis oder Orange
+            stroke={isFasting ? "#FB923C" : "#14B8A6"} // Orange oder Türkis
             strokeWidth="15"
             fill="transparent"
             strokeDasharray={CIRCUMFERENCE}
@@ -118,8 +118,12 @@ export default function App() {
 
         {/* Text in der Mitte */}
         <View style={styles.innerCircle}>
-          <View style={[styles.iconBadge, isFasting ? styles.bgTeal : styles.bgOrange]}>
-            <Feather name={isFasting ? "moon" : "sun"} size={24} color={isFasting ? "#0D9488" : "#EA580C"} />
+          <View style={[styles.iconBadge, isFasting ? styles.bgOrange : styles.bgTeal]}>
+            {isFasting ? (
+              <MaterialCommunityIcons name="food-off" size={24} color="#EA580C" />
+            ) : (
+              <MaterialCommunityIcons name="food-fork-drink" size={24} color="#0D9488" />
+            )}
           </View>
           <Text style={styles.statusLabel}>
             {isFasting ? 'Fastenzeit' : 'Essenszeit'}
