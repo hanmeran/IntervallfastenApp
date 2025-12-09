@@ -267,7 +267,7 @@ export default function App() {
                 keyboardType="numeric"
                 onChangeText={(text) => {
                   const hours = parseInt(text, 10);
-                  if (!isNaN(hours) && hours >= 1 && hours <= 23) {
+                  if (!isNaN(hours) && hours >= 1 && (isLinked ? hours <= 23 : true)) {
                     const newValues = { fastingHours: hours };
                     if (isLinked) newValues.eatingHours = 24 - hours;
                     setEditingPlan(prev => ({ ...prev, ...newValues }));
@@ -294,7 +294,7 @@ export default function App() {
                 keyboardType="numeric"
                 onChangeText={(text) => {
                   const hours = parseInt(text, 10);
-                  if (!isNaN(hours) && hours >= 1 && hours <= 23) {
+                  if (!isNaN(hours) && hours >= 1 && (isLinked ? hours <= 23 : true)) {
                     const newValues = { eatingHours: hours };
                     if (isLinked) newValues.fastingHours = 24 - hours;
                     setEditingPlan(prev => ({ ...prev, ...newValues }));
