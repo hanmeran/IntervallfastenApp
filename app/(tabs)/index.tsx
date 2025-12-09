@@ -154,6 +154,14 @@ export default function App() {
         onPress={() => {
           const stopFasting = async () => {
             try {
+              const GRACE_PERIOD_SECONDS = 300; // 5 Minuten Karenzzeit
+              if (elapsedTime < GRACE_PERIOD_SECONDS) { // Speichert nicht, wenn es WENIGER als 5 Minuten sind
+                // Fasten war zu kurz, wird nicht gespeichert. Nur der aktive Zustand wird zurückgesetzt.
+                await AsyncStorage.removeItem('isFasting');
+                await AsyncStorage.removeItem('startTime');
+                return; // Funktion hier beenden
+              }
+
               const historyString = await AsyncStorage.getItem('fastingHistory');
               const history = historyString ? JSON.parse(historyString) : [];
               
@@ -166,7 +174,7 @@ export default function App() {
                 status = 'nearly_there';
               }
 
-              const newFast = { id: Date.now(), startTime, duration: elapsedTime, status, plan: '16:8 Leangains' };
+              const newFast = { id: Date.now(), startTime, duration: elapsedTime, status: status, plan: '16:8 Leangains' };
               history.unshift(newFast); // Add to the beginning of the array
               await AsyncStorage.setItem('fastingHistory', JSON.stringify(history));
 
@@ -206,7 +214,7 @@ export default function App() {
         <TouchableOpacity onPress={() => setView('timer')} style={styles.iconButton}>
           <Feather name="chevron-left" size={28} color="#475569" />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { marginLeft: 10 }]}>EINSTELLUNGEN</Text>
+        <Text style={styles.headerTitle}>EINSTELLUNGEN</Text>
       </View>
 
       <ScrollView style={{ width: '100%' }}>

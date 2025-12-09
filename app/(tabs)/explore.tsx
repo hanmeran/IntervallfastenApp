@@ -120,6 +120,8 @@ export default function HistoryScreen() {
           const historyString = await AsyncStorage.getItem('fastingHistory');
           if (historyString) {
             setHistory(JSON.parse(historyString));
+          } else {
+            setHistory([]); // Setzt den Verlauf zurück, wenn nichts gefunden wird
           }
         } catch (e) {
           console.error('Failed to load history.', e);
