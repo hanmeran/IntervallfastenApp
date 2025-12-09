@@ -106,8 +106,12 @@ export default function App() {
   };
 
   const getProgress = () => {
-    // Fortschritt berechnen, maximal 100% (1.0)
-    return Math.min((elapsedTime / fastingGoal), 1);
+    // Wenn das Fasten aktiv ist, aber die Zeit noch 0 ist,
+    // geben wir einen minimalen Wert zurück, um den Start des Kreises sofort sichtbar zu machen.
+    if (isFasting && elapsedTime === 0) {
+      return 0.001;
+    }
+    return Math.min(elapsedTime / fastingGoal, 1);
   };
 
   const strokeDashoffset = CIRCUMFERENCE - getProgress() * CIRCUMFERENCE;
@@ -141,7 +145,7 @@ export default function App() {
             cx={CIRCLE_SIZE / 2}
             cy={CIRCLE_SIZE / 2}
             r={RADIUS}
-            stroke={isFasting ? "#14B8A6" : "#FB923C"} // Türkis oder Orange
+            stroke={isFasting ? "#FB923C" : "#14B8A6"} // Orange oder Türkis
             strokeWidth="15"
             fill="transparent"
             strokeDasharray={CIRCUMFERENCE}
@@ -167,9 +171,10 @@ export default function App() {
           <Text style={styles.timerText}>
             {formatTime(elapsedTime)}
           </Text>
-          {isFasting && (
-            <Text style={styles.goalText}>Ziel: {fastingGoal / 3600} Stunden</Text>
-          )}
+          {/* Always render goalText to maintain layout, but make it transparent if not fasting */}
+          <Text style={[styles.goalText, !isFasting && { opacity: 0 }]}>
+            Ziel: {fastingGoal / 3600} Stunden
+          </Text>
         </View>
       </View>
 
@@ -233,7 +238,7 @@ export default function App() {
         }}
         style={[styles.actionButton, isFasting ? styles.btnStop : styles.btnStart]}
       >
-        <Feather name={isFasting ? "square" : "play"} size={24} color={isFasting ? "#EF4444" : "#FFFFFF"} />
+        <Feather name={isFasting ? "square" : "play"} size={24} color={"#FFFFFF"} />
         <Text style={[styles.btnText, isFasting ? styles.textStop : styles.textStart]}>
           {isFasting ? "Fasten beenden" : "Fasten starten"}
         </Text>
@@ -269,6 +274,7 @@ export default function App() {
                     setEditingPlan(prev => ({ ...prev, name: `${prefix} ${filteredName}` })); // Do NOT trim here
                   }}
                 />
+                <View style={styles.unitSpacer} />
               </View>
             </View>
             <Text style={styles.inputHint}>Nur Buchstaben, Zahlen und Leerzeichen.</Text>
@@ -658,12 +664,10 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   btnStart: {
-    backgroundColor: '#0F172A', // Slate 900
+    backgroundColor: '#14B8A6', // Teal 500
   },
   btnStop: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 2,
-    borderColor: '#FFE4E6',
+    backgroundColor: '#FB923C', // Orange 400
   },
   btnText: {
     fontSize: 18,
@@ -671,7 +675,7 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
   textStart: { color: '#FFFFFF' },
-  textStop: { color: '#EF4444' },
+  textStop: { color: '#FFFFFF' },
   
   // Settings Styles
   sectionTitle: {
@@ -796,6 +800,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#475569',
     marginLeft: 10,
+  },
+  unitSpacer: {
+    width: 30, // Corresponds to modalUnitLabel width (20) + marginLeft (10)
+    height: '100%', // Match height of input
   },
   inputRow: {
     flexDirection: 'row',
