@@ -220,7 +220,7 @@ export default function App() {
 
           const newFastingState = !isFasting;
           setIsFasting(newFastingState);
-          if (newFastingState) {
+          if (newFastingState) { // Starting a fast
             const now = Date.now();
             setStartTime(now);
             setElapsedTime(0);
@@ -252,31 +252,44 @@ export default function App() {
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Plan bearbeiten</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Name des Plans"
-              value={editingPlan?.name}
-              onChangeText={(text) => setEditingPlan(prev => ({ ...prev, name: text }))}
-            />
+
+            <View style={styles.inputRow}>
+              <Text style={[styles.modalLabel, styles.nameTimeLabel]}>
+                {editingPlan?.fastingHours || 0}:{editingPlan?.eatingHours || 0}
+              </Text>
+              <View style={styles.inputWrapper}>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Mein Plan"
+                  value={editingPlan?.name.split(' ').slice(1).join(' ')}
+                  onChangeText={(customName) => {
+                    const prefix = `${editingPlan?.fastingHours || 0}:${editingPlan?.eatingHours || 0}`;
+                    setEditingPlan(prev => ({ ...prev, name: `${prefix} ${customName}`.trim() }));
+                  }}
+                />
+              </View>
+            </View>
             
             <View style={styles.inputRow}>
               <Text style={styles.modalLabel}>Fastenzeit</Text>
-              <TextInput
-                style={styles.modalInputHours}
-                value={String(editingPlan?.fastingHours || '')}
-                keyboardType="numeric"
-                onChangeText={(text) => {
-                  const hours = parseInt(text, 10);
-                  if (!isNaN(hours) && hours >= 1 && (isLinked ? hours <= 23 : true)) {
-                    const newValues = { fastingHours: hours };
-                    if (isLinked) newValues.eatingHours = 24 - hours;
-                    setEditingPlan(prev => ({ ...prev, ...newValues }));
-                  } else if (text === '') {
-                    setEditingPlan(prev => ({ ...prev, fastingHours: '' }));
-                  }
-                }}
-              />
-              <Text style={styles.modalUnitLabel}>h</Text>
+              <View style={styles.inputWrapper}>
+                <TextInput
+                  style={styles.textInput}
+                  value={String(editingPlan?.fastingHours || '')}
+                  keyboardType="numeric"
+                  onChangeText={(text) => {
+                    const hours = parseInt(text, 10);
+                    if (!isNaN(hours) && hours >= 1 && (isLinked ? hours <= 23 : true)) {
+                      const newValues = { fastingHours: hours };
+                      if (isLinked) newValues.eatingHours = 24 - hours;
+                      setEditingPlan(prev => ({ ...prev, ...newValues }));
+                    } else if (text === '') {
+                      setEditingPlan(prev => ({ ...prev, fastingHours: '' }));
+                    }
+                  }}
+                />
+                <Text style={styles.modalUnitLabel}>h</Text>
+              </View>
             </View>
 
             <TouchableOpacity style={styles.linkButton} onPress={() => setIsLinked(!isLinked)}>
@@ -288,22 +301,24 @@ export default function App() {
 
             <View style={styles.inputRow}>
               <Text style={styles.modalLabel}>Essenszeit</Text>
-              <TextInput
-                style={styles.modalInputHours}
-                value={String(editingPlan?.eatingHours || '')}
-                keyboardType="numeric"
-                onChangeText={(text) => {
-                  const hours = parseInt(text, 10);
-                  if (!isNaN(hours) && hours >= 1 && (isLinked ? hours <= 23 : true)) {
-                    const newValues = { eatingHours: hours };
-                    if (isLinked) newValues.fastingHours = 24 - hours;
-                    setEditingPlan(prev => ({ ...prev, ...newValues }));
-                  } else if (text === '') {
-                    setEditingPlan(prev => ({ ...prev, eatingHours: '' }));
-                  }
-                }}
-              />
-              <Text style={styles.modalUnitLabel}>h</Text>
+              <View style={styles.inputWrapper}>
+                <TextInput
+                  style={styles.textInput}
+                  value={String(editingPlan?.eatingHours || '')}
+                  keyboardType="numeric"
+                  onChangeText={(text) => {
+                    const hours = parseInt(text, 10);
+                    if (!isNaN(hours) && hours >= 1 && (isLinked ? hours <= 23 : true)) {
+                      const newValues = { eatingHours: hours };
+                      if (isLinked) newValues.fastingHours = 24 - hours;
+                      setEditingPlan(prev => ({ ...prev, ...newValues }));
+                    } else if (text === '') {
+                      setEditingPlan(prev => ({ ...prev, eatingHours: '' }));
+                    }
+                  }}
+                />
+                <Text style={styles.modalUnitLabel}>h</Text>
+              </View>
             </View>
 
             <View style={styles.modalButtonContainer}>
@@ -673,25 +688,32 @@ const styles = StyleSheet.create({
     color: '#1E293B',
     marginBottom: 20,
   },
-  modalInput: {
-    ...baseInputStyle,
-    height: 44, // Match the height of the other input rows
-    marginBottom: 16, // Add margin to the main input
-  },
-  modalLabel: {
+  modalLabel: { // Base style for all labels in modal
     fontSize: 16,
     color: '#475569',
-    width: 90, // Fixed width for label
+    width: 90, // Fixed width for label to align inputs
+  },
+  nameTimeLabel: { // Specific style for the dynamic time label
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#64748B',
   },
   linkButton: {
     padding: 8,
     alignSelf: 'center',
     marginVertical: 4,
   },
-  modalInputHours: { // New style for hours input to remove bottom margin
+  inputWrapper: {
     ...baseInputStyle,
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
     marginBottom: 0,
-    flex: 1, // Take up remaining space
+  },
+  textInput: {
+    flex: 1,
+    height: '100%',
+    fontSize: 16,
   },
   modalUnitLabel: {
     fontSize: 16,
