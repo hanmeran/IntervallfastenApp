@@ -86,7 +86,8 @@ export default function HistoryScreen() {
     if (!history.length) return { count: 0, totalDuration: 0, plans: [] };
 
     const totalDurationSeconds = history.reduce((sum, fast) => sum + fast.duration, 0);
-    const plans = [...new Set(history.map(fast => fast.plan).filter(Boolean))];
+    // Handle both old string plans and new object plans for compatibility
+    const plans = [...new Set(history.map(fast => (typeof fast.plan === 'string' ? fast.plan : fast.plan?.name)).filter(Boolean))];
 
     return {
       count: history.length,
@@ -178,7 +179,8 @@ export default function HistoryScreen() {
                 </View>
                 <View style={styles.cardBody}>
                   <ThemedText style={styles.cardDuration}>Dauer: {formatHistoryTime(fast.duration)}</ThemedText>
-                  {fast.plan && <ThemedText style={styles.cardPlan}>{fast.plan}</ThemedText>}
+                  {/* Handle both old string plans and new object plans */}
+                  {fast.plan && <ThemedText style={styles.cardPlan}>{typeof fast.plan === 'string' ? fast.plan : fast.plan.name}</ThemedText>}
                 </View>
               </View>
             );

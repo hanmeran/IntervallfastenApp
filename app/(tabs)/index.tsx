@@ -1,7 +1,7 @@
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons'; // Standard Icons in Expo
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useState } from 'react';
-import { Alert, Dimensions, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Dimensions, Modal, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Circle, Svg } from 'react-native-svg';
 
 const { width } = Dimensions.get('window');
@@ -13,8 +13,44 @@ export default function App() {
   const [isFasting, setIsFasting] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0); // in Sekunden
   const [startTime, setStartTime] = useState(0); // timestamp
-  const [fastingGoal, setFastingGoal] = useState(16 * 3600); // 16 Stunden Standard
   const [view, setView] = useState('timer'); // 'timer' oder 'settings'
+
+  const [plans, setPlans] = useState([]);
+  const [activePlanId, setActivePlanId] = useState(null);
+
+  const [isModalVisible, setIsModalVisible] = useState(false);
+  const [editingPlan, setEditingPlan] = useState(null);
+  const [isLinked, setIsLinked] = useState(true);
+  const [isNewPlan, setIsNewPlan] = useState(false);
+
+  const activePlan = plans.find(p => p.id === activePlanId) || null;
+  const fastingGoal = (activePlan?.fastingHours || 16) * 3600;
+
+  // Load plans from storage on initial mount
+  useEffect(() => {
+    const loadPlans = async () => {
+      try {
+        let plansString = await AsyncStorage.getItem('fastingPlans');
+        let activeIdString = await AsyncStorage.getItem('activePlanId');
+
+        if (!plansString) {
+          // Create default plan if none exist
+          const defaultPlan = { id: 1, name: '16:8 Leangains', fastingHours: 16, eatingHours: 8 };
+          const defaultPlans = [defaultPlan];
+          await AsyncStorage.setItem('fastingPlans', JSON.stringify(defaultPlans));
+          await AsyncStorage.setItem('activePlanId', '1');
+          setPlans(defaultPlans);
+          setActivePlanId(1);
+        } else {
+          setPlans(JSON.parse(plansString));
+          setActivePlanId(activeIdString ? parseInt(activeIdString, 10) : 1);
+        }
+      } catch (e) {
+        console.error("Failed to load plans.", e);
+      }
+    };
+    loadPlans();
+  }, []);
 
   // Load initial state from storage
   useEffect(() => {
@@ -70,8 +106,12 @@ export default function App() {
   };
 
   const getProgress = () => {
-    // Fortschritt berechnen, maximal 100% (1.0)
-    return Math.min((elapsedTime / fastingGoal), 1);
+    // Wenn das Fasten aktiv ist, aber die Zeit noch 0 ist,
+    // geben wir einen minimalen Wert zurück, um den Start des Kreises sofort sichtbar zu machen.
+    if (isFasting && elapsedTime === 0) {
+      return 0.001;
+    }
+    return Math.min(elapsedTime / fastingGoal, 1);
   };
 
   const strokeDashoffset = CIRCUMFERENCE - getProgress() * CIRCUMFERENCE;
@@ -131,9 +171,10 @@ export default function App() {
           <Text style={styles.timerText}>
             {formatTime(elapsedTime)}
           </Text>
-          {isFasting && (
-            <Text style={styles.goalText}>Ziel: {fastingGoal / 3600} Stunden</Text>
-          )}
+          {/* Always render goalText to maintain layout, but make it transparent if not fasting */}
+          <Text style={[styles.goalText, !isFasting && { opacity: 0 }]}>
+            Ziel: {fastingGoal / 3600} Stunden
+          </Text>
         </View>
       </View>
 
@@ -174,7 +215,12 @@ export default function App() {
                 status = 'nearly_there';
               }
 
-              const newFast = { id: Date.now(), startTime, duration: elapsedTime, status: status, plan: '16:8 Leangains' };
+              const planSnapshot = {
+                name: activePlan?.name || 'Unbekannter Plan',
+                fastingHours: activePlan?.fastingHours || 16,
+              };
+
+              const newFast = { id: Date.now(), startTime, duration: elapsedTime, status, plan: planSnapshot };
               history.unshift(newFast); // Add to the beginning of the array
               await AsyncStorage.setItem('fastingHistory', JSON.stringify(history));
 
@@ -188,7 +234,7 @@ export default function App() {
 
           const newFastingState = !isFasting;
           setIsFasting(newFastingState);
-          if (newFastingState) {
+          if (newFastingState) { // Starting a fast
             const now = Date.now();
             setStartTime(now);
             setElapsedTime(0);
@@ -200,7 +246,7 @@ export default function App() {
         }}
         style={[styles.actionButton, isFasting ? styles.btnStop : styles.btnStart]}
       >
-        <Feather name={isFasting ? "square" : "play"} size={24} color={isFasting ? "#EF4444" : "#FFFFFF"} />
+        <Feather name={isFasting ? "square" : "play"} size={24} color={"#FFFFFF"} />
         <Text style={[styles.btnText, isFasting ? styles.textStop : styles.textStart]}>
           {isFasting ? "Fasten beenden" : "Fasten starten"}
         </Text>
@@ -210,23 +256,207 @@ export default function App() {
 
   const renderSettingsView = () => (
     <View style={styles.contentContainer}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => setView('timer')} style={styles.iconButton}>
-          <Feather name="chevron-left" size={28} color="#475569" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>EINSTELLUNGEN</Text>
+      {/* Edit Plan Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={isModalVisible && editingPlan !== null}
+        onRequestClose={() => setIsModalVisible(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>{isNewPlan ? 'Neuen Plan erstellen' : 'Plan bearbeiten'}</Text>
+
+            <View style={styles.inputRow}>
+              <Text style={[styles.modalLabel, styles.nameTimeLabel]}>
+                {editingPlan?.fastingHours || 0}:{editingPlan?.eatingHours || 0}
+              </Text>
+              <View style={styles.inputWrapper}>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Mein Plan"
+                  value={editingPlan?.name.split(' ').slice(1).join(' ')}
+                  onChangeText={(customName) => {
+                    const filteredName = customName.replace(/[^a-zA-Z0-9 ]/g, ''); // Erlaubt nur Buchstaben, Zahlen und Leerzeichen
+                    const prefix = `${editingPlan?.fastingHours || 0}:${editingPlan?.eatingHours || 0}`; // Keep prefix
+                    setEditingPlan(prev => ({ ...prev, name: `${prefix} ${filteredName}` })); // Do NOT trim here
+                  }}
+                />
+                <View style={styles.unitSpacer} />
+              </View>
+            </View>
+            <Text style={styles.inputHint}>Nur Buchstaben, Zahlen und Leerzeichen.</Text>
+            
+            <View style={styles.inputRow}>
+              <Text style={styles.modalLabel}>Fastenzeit</Text>
+              <View style={styles.inputWrapper}>
+                <TextInput
+                  style={styles.textInput}
+                  value={String(editingPlan?.fastingHours || '')}
+                  keyboardType="numeric"
+                  onChangeText={(text) => {
+                    const hours = parseInt(text, 10);
+                    if (!isNaN(hours) && hours >= 1 && (isLinked ? hours <= 23 : true)) {
+                      const newValues = { fastingHours: hours };
+                      if (isLinked) newValues.eatingHours = 24 - hours;
+                      setEditingPlan(prev => ({ ...prev, ...newValues }));
+                    } else if (text === '') {
+                      setEditingPlan(prev => ({ ...prev, fastingHours: '' }));
+                    }
+                  }}
+                />
+                <Text style={styles.modalUnitLabel}>h</Text>
+              </View>
+            </View>
+
+            <TouchableOpacity style={styles.linkButton} onPress={() => setIsLinked(!isLinked)}>
+              <MaterialCommunityIcons
+                name={isLinked ? "link-variant" : "link-variant-off"}
+                size={24}
+                color={isLinked ? "#14B8A6" : "#94A3B8"} />
+            </TouchableOpacity>
+
+            <View style={styles.inputRow}>
+              <Text style={styles.modalLabel}>Essenszeit</Text>
+              <View style={styles.inputWrapper}>
+                <TextInput
+                  style={styles.textInput}
+                  value={String(editingPlan?.eatingHours || '')}
+                  keyboardType="numeric"
+                  onChangeText={(text) => {
+                    const hours = parseInt(text, 10);
+                    if (!isNaN(hours) && hours >= 1 && (isLinked ? hours <= 23 : true)) {
+                      const newValues = { eatingHours: hours };
+                      if (isLinked) newValues.fastingHours = 24 - hours;
+                      setEditingPlan(prev => ({ ...prev, ...newValues }));
+                    } else if (text === '') {
+                      setEditingPlan(prev => ({ ...prev, eatingHours: '' }));
+                    }
+                  }}
+                />
+                <Text style={styles.modalUnitLabel}>h</Text>
+              </View>
+            </View>
+
+            <View style={styles.modalButtonContainer}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={() => setIsModalVisible(false)}
+              >
+                <Text style={styles.cancelButtonText}>Abbrechen</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.saveButton]}
+                onPress={async () => {
+                  let updatedPlans;
+                  const planToSave = { ...editingPlan, name: editingPlan.name.trim() }; // Trim name before saving
+                  if (isNewPlan) {
+                    updatedPlans = [...plans, planToSave];
+                  } else {
+                    updatedPlans = plans.map(p => p.id === editingPlan.id ? planToSave : p);
+                  }
+                  setPlans(updatedPlans);
+                  await AsyncStorage.setItem('fastingPlans', JSON.stringify(updatedPlans));
+                  setIsModalVisible(false);
+                  setEditingPlan(null);
+                }}
+              >
+                <Text style={styles.saveButtonText}>Speichern</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <View style={[styles.header, { justifyContent: 'flex-start' }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <TouchableOpacity onPress={() => setView('timer')} style={styles.iconButton}>
+            <Feather name="chevron-left" size={28} color="#475569" />
+          </TouchableOpacity>
+          <Text style={[styles.headerTitle, { marginLeft: 10 }]}>EINSTELLUNGEN</Text>
+        </View>
       </View>
 
       <ScrollView style={{ width: '100%' }}>
         <Text style={styles.sectionTitle}>FASTENPLAN</Text>
         <View style={styles.card}>
-          <View style={[styles.planRow, styles.activePlanRow]}>
-            <View>
-              <Text style={[styles.planLabel, styles.activePlanLabel]}>16:8 Leangains</Text>
-              <Text style={styles.planDesc}>16h Fasten, 8h Essen</Text>
-            </View>
-            <View style={styles.activeDot} />
-          </View>
+          {plans.map(plan => (
+            <TouchableOpacity
+              key={plan.id}
+              onPress={async () => {
+                setActivePlanId(plan.id);
+                await AsyncStorage.setItem('activePlanId', String(plan.id));
+              }}
+            >
+              <View style={[styles.planRow, plan.id === activePlanId && styles.activePlanRow]}>
+                <View>
+                  <Text style={[styles.planLabel, plan.id === activePlanId && styles.activePlanLabel]}>{plan.name}</Text>
+                  <Text style={styles.planDesc}>{plan.fastingHours}h Fasten, {plan.eatingHours}h Essen</Text>
+                </View>
+                <View style={{ flexDirection: 'row' }}>
+                  <TouchableOpacity
+                    style={styles.iconButton}
+                    onPress={() => {
+                      // Reset states when opening modal
+                      setEditingPlan({ ...plan }); 
+                      setIsNewPlan(false);
+                      setIsLinked(true);
+                      setIsModalVisible(true);
+                    }}
+                  >
+                    <Feather name="edit-2" size={20} color="#94A3B8" />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.iconButton}
+                    onPress={() => {
+                      if (plan.id === activePlanId) {
+                        Alert.alert('Aktion nicht möglich', 'Der aktive Plan kann nicht gelöscht werden.');
+                        return;
+                      }
+                      if (plans.length <= 1) {
+                        Alert.alert('Aktion nicht möglich', 'Der letzte verbleibende Plan kann nicht gelöscht werden.');
+                        return;
+                      }
+
+                      Alert.alert(
+                        'Plan löschen',
+                        `Möchtest du den Plan "${plan.name}" wirklich löschen?`,
+                        [
+                          { text: 'Abbrechen', style: 'cancel' },
+                          { text: 'Löschen', style: 'destructive', onPress: async () => {
+                              const updatedPlans = plans.filter(p => p.id !== plan.id);
+                              setPlans(updatedPlans);
+                              await AsyncStorage.setItem('fastingPlans', JSON.stringify(updatedPlans));
+                          }},
+                        ]
+                      );
+                    }}
+                  >
+                    <Feather name="trash-2" size={20} color="#EF4444" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableOpacity>
+          ))}
+          {plans.length < 7 && (
+            <TouchableOpacity
+              style={[styles.planRow, styles.addPlanButton]}
+              onPress={() => {
+                const newPlanId = Date.now(); // Simple unique ID
+                setEditingPlan({
+                  id: newPlanId,
+                  name: '16:8 Mein Plan',
+                  fastingHours: 16,
+                  eatingHours: 8,
+                });
+                setIsNewPlan(true);
+                setIsLinked(true);
+                setIsModalVisible(true);
+              }}
+            >
+              <Text style={styles.addPlanButtonText}>+ Neuen Plan hinzufügen</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Developer Section */}
@@ -278,7 +508,7 @@ export default function App() {
                     startTime: fastDate.getTime(),
                     duration,
                     status,
-                    plan: '16:8 Leangains',
+                    plan: { name: '16:8 Leangains', fastingHours: 16 },
                   };
                 });
 
@@ -326,6 +556,16 @@ export default function App() {
   );
 }
 
+const baseInputStyle = {
+  backgroundColor: '#F8FAFC',
+  borderWidth: 1,
+  borderColor: '#E2E8F0',
+  borderRadius: 8,
+  paddingHorizontal: 12,
+  paddingVertical: 10,
+  fontSize: 16,
+};
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -365,7 +605,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  iconBadge: {
+  iconBadge: { // TODO: Farben umkehren
     padding: 12,
     borderRadius: 50,
     marginBottom: 10,
@@ -432,12 +672,10 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   btnStart: {
-    backgroundColor: '#0F172A', // Slate 900
+    backgroundColor: '#14B8A6', // Teal 500
   },
   btnStop: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 2,
-    borderColor: '#FFE4E6',
+    backgroundColor: '#FB923C', // Orange 400
   },
   btnText: {
     fontSize: 18,
@@ -445,7 +683,7 @@ const styles = StyleSheet.create({
     marginLeft: 12,
   },
   textStart: { color: '#FFFFFF' },
-  textStop: { color: '#EF4444' },
+  textStop: { color: '#FFFFFF' },
   
   // Settings Styles
   sectionTitle: {
@@ -479,17 +717,131 @@ const styles = StyleSheet.create({
     color: '#334155',
   },
   activePlanLabel: {
-    color: '#0F766E',
+    color: '#0F766E', // Teal-800
   },
   planDesc: {
     fontSize: 13,
     color: '#94A3B8',
     marginTop: 2,
   },
+  planHoursContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   activeDot: {
     width: 10,
     height: 10,
     borderRadius: 5,
     backgroundColor: '#14B8A6',
+  },
+  addPlanButton: {
+    justifyContent: 'center',
+    backgroundColor: '#F0F9FF', // Light blue background
+    borderBottomWidth: 0, // No bottom border for the last item
+  },
+  addPlanButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#0EA5E9', // Sky 500
+    textAlign: 'center',
+    paddingVertical: 4,
+  },
+
+  // Modal Styles
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+  },
+  modalContent: {
+    width: '90%',
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1E293B',
+    marginBottom: 20,
+  },
+  modalLabel: { // Base style for all labels in modal
+    fontSize: 16,
+    color: '#475569',
+    width: 90, // Fixed width for label to align inputs
+  },
+  nameTimeLabel: { // Specific style for the dynamic time label
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  linkButton: {
+    padding: 8,
+    alignSelf: 'center',
+    marginVertical: 4,
+  },
+  inputHint: {
+    fontSize: 12,
+    color: '#94A3B8',
+    alignSelf: 'flex-end',
+    marginBottom: 12,
+  },
+  inputWrapper: {
+    ...baseInputStyle,
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginBottom: 0,
+  },
+  textInput: {
+    flex: 1,
+    height: '100%',
+    fontSize: 16,
+  },
+  modalUnitLabel: {
+    fontSize: 16,
+    color: '#475569',
+    marginLeft: 10,
+  },
+  unitSpacer: {
+    width: 30, // Corresponds to modalUnitLabel width (20) + marginLeft (10)
+    height: '100%', // Match height of input
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 44, // Explicit height
+    marginBottom: 4, // Small gap between rows
+  },
+  modalButtonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 24,
+  },
+  modalButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    marginLeft: 10,
+  },
+  saveButton: {
+    backgroundColor: '#0F172A',
+  },
+  saveButtonText: {
+    color: 'white',
+    fontWeight: '600',
+  },
+  cancelButton: {
+    backgroundColor: '#F1F5F9',
+  },
+  cancelButtonText: {
+    color: '#475569',
+    fontWeight: '600',
   },
 });
