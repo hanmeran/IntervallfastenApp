@@ -195,6 +195,14 @@ export default function App() {
         onPress={() => {
           const stopFasting = async () => {
             try {
+              const GRACE_PERIOD_SECONDS = 300; // 5 Minuten Karenzzeit
+              if (elapsedTime < GRACE_PERIOD_SECONDS) { // Speichert nicht, wenn es WENIGER als 5 Minuten sind
+                // Fasten war zu kurz, wird nicht gespeichert. Nur der aktive Zustand wird zurückgesetzt.
+                await AsyncStorage.removeItem('isFasting');
+                await AsyncStorage.removeItem('startTime');
+                return; // Funktion hier beenden
+              }
+
               const historyString = await AsyncStorage.getItem('fastingHistory');
               const history = historyString ? JSON.parse(historyString) : [];
               
