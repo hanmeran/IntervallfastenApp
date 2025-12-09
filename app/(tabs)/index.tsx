@@ -264,12 +264,14 @@ export default function App() {
                   placeholder="Mein Plan"
                   value={editingPlan?.name.split(' ').slice(1).join(' ')}
                   onChangeText={(customName) => {
-                    const prefix = `${editingPlan?.fastingHours || 0}:${editingPlan?.eatingHours || 0}`;
-                    setEditingPlan(prev => ({ ...prev, name: `${prefix} ${customName}`.trim() }));
+                    const filteredName = customName.replace(/[^a-zA-Z0-9 ]/g, ''); // Erlaubt nur Buchstaben, Zahlen und Leerzeichen
+                    const prefix = `${editingPlan?.fastingHours || 0}:${editingPlan?.eatingHours || 0}`; // Keep prefix
+                    setEditingPlan(prev => ({ ...prev, name: `${prefix} ${filteredName}` })); // Do NOT trim here
                   }}
                 />
               </View>
             </View>
+            <Text style={styles.inputHint}>Nur Buchstaben, Zahlen und Leerzeichen.</Text>
             
             <View style={styles.inputRow}>
               <Text style={styles.modalLabel}>Fastenzeit</Text>
@@ -333,10 +335,11 @@ export default function App() {
                 style={[styles.modalButton, styles.saveButton]}
                 onPress={async () => {
                   let updatedPlans;
+                  const planToSave = { ...editingPlan, name: editingPlan.name.trim() }; // Trim name before saving
                   if (isNewPlan) {
-                    updatedPlans = [...plans, editingPlan];
+                    updatedPlans = [...plans, planToSave];
                   } else {
-                    updatedPlans = plans.map(p => p.id === editingPlan.id ? editingPlan : p);
+                    updatedPlans = plans.map(p => p.id === editingPlan.id ? planToSave : p);
                   }
                   setPlans(updatedPlans);
                   await AsyncStorage.setItem('fastingPlans', JSON.stringify(updatedPlans));
@@ -421,7 +424,7 @@ export default function App() {
               </View>
             </TouchableOpacity>
           ))}
-          {plans.length < 10 && (
+          {plans.length < 7 && (
             <TouchableOpacity
               style={[styles.planRow, styles.addPlanButton]}
               onPress={() => {
@@ -770,6 +773,12 @@ const styles = StyleSheet.create({
     padding: 8,
     alignSelf: 'center',
     marginVertical: 4,
+  },
+  inputHint: {
+    fontSize: 12,
+    color: '#94A3B8',
+    alignSelf: 'flex-end',
+    marginBottom: 12,
   },
   inputWrapper: {
     ...baseInputStyle,
